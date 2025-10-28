@@ -42,13 +42,14 @@ const VersionToSettingsChangesMap & getSettingsChangesHistory()
         addSettingsChanges(settings_changes_history, "25.11",
         {
             {"correlated_subqueries_default_join_kind", "left", "right", "New setting. Default join kind for decorrelated query plan."},
+            {"query_result_cache_ignore_log_comment", false, true, "New setting."},
             {"use_statistics_cache", 0, 0, "New setting"},
             {"s3_retry_attempts", 500, 500, "Changed the value of the obsolete setting"},
         });
         addSettingsChanges(settings_changes_history, "25.10",
         {
-            {"query_result_cache_ignore_log_comment", false, true, "New setting."},
             {"correlated_subqueries_default_join_kind", "left", "right", "New setting. Default join kind for decorrelated query plan."},
+            {"query_result_cache_ignore_log_comment", false, true, "New setting."},
             {"show_data_lake_catalogs_in_system_tables", true, false, "Disable catalogs in system tables by default"},
             {"optimize_rewrite_like_perfect_affix", false, true, "New setting"},
             {"allow_dynamic_type_in_join_keys", true, false, "Disallow using Dynamic type in JOIN keys by default"},
