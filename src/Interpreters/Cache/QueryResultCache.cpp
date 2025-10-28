@@ -202,7 +202,8 @@ bool isOtherIgnoredSetting(const String & setting_name, bool ignore_log_comment)
 class RemoveQueryResultCacheSettingsMatcher
 {
 public:
-    struct Data {
+    struct Data
+    {
         bool ignore_log_comment;
     };
 
