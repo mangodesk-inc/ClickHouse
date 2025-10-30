@@ -2,13 +2,13 @@ import argparse
 import os
 import random
 import re
-import time
 from pathlib import Path
 
 from ci.jobs.scripts.cidb_cluster import CIDBCluster
 from ci.jobs.scripts.clickhouse_proc import ClickHouseProc
 from ci.jobs.scripts.functional_tests.export_coverage import CoverageExporter
 from ci.jobs.scripts.functional_tests_results import FTResultsProcessor
+from ci.jobs.scripts.tests_targeting import Targeting
 from ci.praktika.info import Info
 from ci.praktika.result import Result
 from ci.praktika.utils import MetaClasses, Shell, Utils
@@ -52,40 +52,17 @@ def parse_args():
         type=str,
         default="",
     )
+    parser.add_argument("--workers", help="Workers count", default=None)
     return parser.parse_args()
-
-
-def get_changed_tests(info: Info):
-    result = set()
-    changed_files = info.get_changed_files()
-    assert changed_files, "No changed files"
-
-    for fpath in changed_files:
-        if re.match(r"tests/queries/0_stateless/\d{5}", fpath):
-            if not Path(fpath).exists():
-                print(f"File '{fpath}' was removed — skipping")
-                continue
-
-            print(f"Detected changed test file: '{fpath}'")
-
-            fname = os.path.basename(fpath)
-            fname_without_ext = os.path.splitext(fname)[0]
-
-            # Add '.' suffix to precisely match this test only
-            result.add(f"{fname_without_ext}.")
-
-        elif fpath.startswith("tests/queries/"):
-            # Log any other suspicious file in tests/queries for future debugging
-            print(f"File '{fpath}' changed, but doesn't match expected test pattern")
-
-    return sorted(result)
 
 
 def run_tests(
     batch_num: int,
     batch_total: int,
-    test="",
+    tests: list[str] = None,
     extra_args="",
+    rerun_count=1,
+    random_order=False,
 ):
     test_output_file = f"{temp_dir}/test_result.txt"
     if batch_num and batch_total:
@@ -98,21 +75,10 @@ def run_tests(
         extra_args += " --zookeeper"
     # Remove --report-logs-stats, it hides sanitizer errors in def reportLogStats(args): clickhouse_execute(args, "SYSTEM FLUSH LOGS")
     command = f"clickhouse-test --testname --check-zookeeper-session --hung-check --trace \
-                --capture-client-stacktrace --queries ./tests/queries --test-runs 1 \
+                --capture-client-stacktrace --queries ./tests/queries --test-runs {rerun_count} \
                 {extra_args} \
-                --queries ./tests/queries -- '{' '.join(test)}' | ts '%Y-%m-%d %H:%M:%S' \
+                --queries ./tests/queries {('--order=random' if random_order else '')} -- {' '.join(tests) if tests else ''} | ts '%Y-%m-%d %H:%M:%S' \
                 | tee -a \"{test_output_file}\""
-    if Path(test_output_file).exists():
-        Path(test_output_file).unlink()
-    Shell.run(command, verbose=True)
-
-
-def run_specific_tests(tests, runs=1, extra_args=""):
-    test_output_file = f"{temp_dir}/test_result.txt"
-    # Remove --report-logs-stats, it hides sanitizer errors in def reportLogStats(args): clickhouse_execute(args, "SYSTEM FLUSH LOGS")
-    command = f"clickhouse-test --testname --shard --zookeeper --check-zookeeper-session --hung-check --trace \
-        --capture-client-stacktrace --queries ./tests/queries --test-runs {runs} \
-        {extra_args} --order=random -- {' '.join(tests)} | ts '%Y-%m-%d %H:%M:%S' | tee -a \"{test_output_file}\""
     if Path(test_output_file).exists():
         Path(test_output_file).unlink()
     Shell.run(command, verbose=True)
@@ -148,6 +114,7 @@ def main():
     batch_num, total_batches = 0, 0
     config_installs_args = ""
     is_flaky_check = False
+    is_targeted_check = False
     is_bugfix_validation = False
     is_s3_storage = False
     is_azure_storage = False
@@ -167,10 +134,13 @@ def main():
         elif to in OPTIONS_TO_INSTALL_ARGUMENTS:
             print(f"NOTE: Enabled config option [{OPTIONS_TO_INSTALL_ARGUMENTS[to]}]")
             config_installs_args += f" {OPTIONS_TO_INSTALL_ARGUMENTS[to]}"
-        elif to.startswith("amd_") or to.startswith("arm_") or "flaky" in to:
-            if "coverage" in to:
-                print("Enable Coverage")
-                is_coverage = True
+        elif (
+            to.startswith("amd_")
+            or to.startswith("arm_")
+            or "flaky" in to
+            or "targeted" in to
+        ):
+            pass
         elif to in OPTIONS_TO_TEST_RUNNER_ARGUMENTS:
             print(
                 f"NOTE: Enabled test runner option [{OPTIONS_TO_TEST_RUNNER_ARGUMENTS[to]}]"
@@ -184,10 +154,14 @@ def main():
                 continue
             runner_options += f" {OPTIONS_TO_TEST_RUNNER_ARGUMENTS[to]}"
 
-        if "flaky" in to:
+        if "targeted" in to:
+            is_targeted_check = True
+        elif "flaky" in to:
             is_flaky_check = True
         elif "BugfixValidation" in to:
             is_bugfix_validation = True
+        elif "coverage" in to:
+            is_coverage = True
 
         if "s3 storage" in to:
             is_s3_storage = True
@@ -215,7 +189,23 @@ def main():
         else:
             pass
 
-    runner_options += f" --jobs {nproc}"
+    if args.workers:
+        print(f"Workers count set from --workers: {args.workers}")
+        runner_options += f" --jobs {args.workers}"
+    else:
+        print(f"Workers count set to optimal value: {nproc}")
+        runner_options += f" --jobs {nproc}"
+
+    rerun_count = 1
+    if args.count:
+        print(f"Rerun count set from --count: {args.count}")
+        rerun_count = args.count
+    elif is_flaky_check:
+        print(f"Rerun count set to 50 for flaky check")
+        rerun_count = 50
+    elif is_targeted_check:
+        print(f"Rerun count set to 5 for targeted check")
+        rerun_count = 5
 
     if not info.is_local_run:
         # TODO: find a way to work with Azure secret so it's ok for local tests as well, for now keep azure disabled
@@ -237,7 +227,11 @@ def main():
         if not info.is_local_run or not (Path(temp_dir) / "clickhouse").is_file():
             link_arch = "aarch64" if Utils.is_arm() else "amd64"
             link_to_master_head_binary = f"https://clickhouse-builds.s3.us-east-1.amazonaws.com/master/{link_arch}/clickhouse"
-            Shell.run(f"wget -nv -P {temp_dir} {link_to_master_head_binary}", verbose=True, strict=True)
+            Shell.run(
+                f"wget -nv -P {temp_dir} {link_to_master_head_binary}",
+                verbose=True,
+                strict=True,
+            )
     elif args.path:
         assert Path(args.path).is_dir(), f"Path [{args.path}] is not a directory"
         ch_path = str(Path(args.path).absolute())
@@ -260,6 +254,10 @@ def main():
 
     stop_watch = Utils.Stopwatch()
 
+    res = True
+    results = []
+    debug_files = []
+
     stages = list(JobStages)
     if not is_coverage:
         stages.remove(JobStages.COLLECT_COVERAGE)
@@ -274,20 +272,32 @@ def main():
             stages.remove(JobStages.COLLECT_COVERAGE)
 
     tests = args.test
+    targeter = Targeting(info=info)
     if is_flaky_check or is_bugfix_validation:
         if info.is_local_run:
             assert (
                 args.test
             ), "For running flaky or bugfix_validation check locally, test case name must be provided via --test"
-            tests = args.test
         else:
-            tests = get_changed_tests(info)
+            tests = targeter.get_changed_tests()
+
         if tests:
             print(f"Test list: [{tests}]")
         else:
             # early exit
             Result.create_from(
                 status=Result.Status.SKIPPED, info="No tests to run"
+            ).complete_job()
+
+    if is_targeted_check:
+        assert not args.test, "--test not supposed to be used for targeted check ???"
+        tests, results_with_info = targeter.get_all_relevant_tests_with_info(ch_path)
+        results.append(results_with_info)
+        if not tests:
+            # early exit
+            Result.create_from(
+                status=Result.Status.SKIPPED,
+                info="No failed tests found from previous runs",
             ).complete_job()
 
     stage = args.param or JobStages.INSTALL_CLICKHOUSE
@@ -297,10 +307,6 @@ def main():
         while stage in stages:
             stages.pop(0)
         stages.insert(0, stage)
-
-    res = True
-    results = []
-    debug_files = []
 
     Utils.add_to_PATH(f"{ch_path}:tests")
     CH = ClickHouseProc(
@@ -339,7 +345,7 @@ def main():
             CH.set_random_timezone,
         ]
 
-        if is_flaky_check:
+        if is_flaky_check or is_targeted_check:
             commands.append(CH.enable_thread_fuzzer_config)
 
         os.environ["MALLOC_CONF"] = (
@@ -404,20 +410,14 @@ def main():
         stop_watch_ = Utils.Stopwatch()
         step_name = "Tests"
         print(step_name)
-        if not tests:
-            run_tests(
-                batch_num=batch_num,
-                batch_total=total_batches,
-                test="",
-                extra_args=runner_options,
-            )
-        else:
-            runs = 1
-            if args.count:
-                runs = args.count
-            elif is_flaky_check:
-                runs = 50
-            run_specific_tests(tests=tests, runs=runs, extra_args=runner_options)
+        run_tests(
+            batch_num=batch_num if not tests else 0,
+            batch_total=total_batches if not tests else 0,
+            tests=tests,
+            extra_args=runner_options,
+            random_order=is_flaky_check or is_targeted_check or is_bugfix_validation,
+            rerun_count=rerun_count,
+        )
 
         if not info.is_local_run:
             CH.stop_log_exports()
