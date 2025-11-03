@@ -27,13 +27,13 @@
 
 #include <IO/CompressedReadBufferWrapper.h>
 #include <Interpreters/ExpressionActions.h>
-#include <Storages/ObjectStorage/DataLakes/Common.h>
+#include <Storages/ObjectStorage/DataLakes/Common/Common.h>
 #include <Storages/ObjectStorage/DataLakes/DataLakeStorageSettings.h>
 #include <Storages/ObjectStorage/DataLakes/Iceberg/IcebergMetadataFilesCache.h>
 #include <Storages/ObjectStorage/StorageObjectStorageSource.h>
 
 #include <Storages/ColumnsDescription.h>
-#include <Storages/ObjectStorage/DataLakes/Iceberg/AvroForIcebergDeserializer.h>
+#include <Storages/ObjectStorage/DataLakes/Common/AvroForIcebergDeserializer.h>
 #include <Storages/ObjectStorage/DataLakes/Iceberg/Constant.h>
 #include <Storages/ObjectStorage/DataLakes/Iceberg/IcebergMetadata.h>
 #include <Storages/ObjectStorage/DataLakes/Iceberg/ManifestFile.h>
@@ -82,13 +82,13 @@ Iceberg::ManifestFilePtr getManifestFile(
     bool use_iceberg_metadata_cache
         = (persistent_table_components.metadata_cache && log_level < DB::IcebergMetadataLogLevel::ManifestFileMetadata);
 
-    auto create_fn = [&]()
+    auto create_fn = [&, use_iceberg_metadata_cache]()
     {
         RelativePathWithMetadata manifest_object_info(filename);
 
         auto read_settings = local_context->getReadSettings();
         /// Do not utilize filesystem cache if more precise cache enabled
-        if (persistent_table_components.metadata_cache)
+        if (use_iceberg_metadata_cache)
             read_settings.enable_filesystem_cache = false;
 
         auto buffer = createReadBuffer(manifest_object_info, object_storage, local_context, log, read_settings);
@@ -130,17 +130,16 @@ ManifestFileCacheKeys getManifestList(
 
     IcebergMetadataLogLevel log_level = local_context->getSettingsRef()[Setting::iceberg_metadata_log_level].value;
 
-    bool use_manifest_file_cache
+    bool use_iceberg_metadata_cache
         = (persistent_table_components.metadata_cache && log_level < DB::IcebergMetadataLogLevel::ManifestListMetadata);
 
-
-    auto create_fn = [&]()
+    auto create_fn = [&, use_iceberg_metadata_cache]()
     {
         StorageObjectStorage::ObjectInfo object_info(filename);
 
         auto read_settings = local_context->getReadSettings();
         /// Do not utilize filesystem cache if more precise cache enabled
-        if (persistent_table_components.metadata_cache)
+        if (use_iceberg_metadata_cache)
             read_settings.enable_filesystem_cache = false;
 
         auto manifest_list_buf = createReadBuffer(object_info, object_storage, local_context, log, read_settings);
@@ -154,6 +153,7 @@ ManifestFileCacheKeys getManifestList(
             DB::IcebergMetadataLogLevel::ManifestListMetadata,
             configuration_ptr->getRawPath().path,
             filename,
+            std::nullopt,
             std::nullopt);
 
         for (size_t i = 0; i < manifest_list_deserializer.rows(); ++i)
@@ -188,7 +188,8 @@ ManifestFileCacheKeys getManifestList(
                 DB::IcebergMetadataLogLevel::ManifestListEntry,
                 configuration_ptr->getRawPath().path,
                 filename,
-                i);
+                i,
+                std::nullopt);
         }
         /// We only return the list of {file name, seq number} for cache.
         /// Because ManifestList holds a list of ManifestFilePtr which consume much memory space.
@@ -197,7 +198,7 @@ ManifestFileCacheKeys getManifestList(
     };
 
     ManifestFileCacheKeys manifest_file_cache_keys;
-    if (use_manifest_file_cache)
+    if (use_iceberg_metadata_cache)
         manifest_file_cache_keys = persistent_table_components.metadata_cache->getOrSetManifestFileCacheKeys(
             IcebergMetadataFilesCache::getKey(configuration_ptr, filename), create_fn);
     else
@@ -249,7 +250,6 @@ std::pair<Poco::JSON::Object::Ptr, Int32> parseTableSchemaV1Method(const Poco::J
     auto current_schema_id = schema->getValue<int>(f_schema_id);
     return {schema, current_schema_id};
 }
-
 }
 }
 

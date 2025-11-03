@@ -122,7 +122,7 @@ public:
 
     Field operator[](size_t n) const override;
     void get(size_t n, Field & res) const override;
-    std::pair<String, DataTypePtr> getValueNameAndType(size_t n) const override;
+    DataTypePtr getValueNameAndTypeImpl(WriteBufferFromOwnString &, size_t n, const Options &) const override;
 
     bool isDefaultAt(size_t n) const override;
     StringRef getDataAt(size_t n) const override;
@@ -144,8 +144,11 @@ public:
     void popBack(size_t n) override;
 
     StringRef serializeValueIntoArena(size_t n, Arena & arena, char const *& begin) const override;
+    StringRef serializeAggregationStateValueIntoArena(size_t n, Arena & arena, char const *& begin) const override;
     const char * deserializeAndInsertFromArena(const char * pos) override;
+    const char * deserializeAndInsertAggregationStateValueFromArena(const char * pos) override;
     const char * skipSerializedInArena(const char * pos) const override;
+    std::optional<size_t> getSerializedValueSize(size_t) const override { return std::nullopt; }
 
     void updateHashWithValue(size_t n, SipHash & hash) const override;
     WeakHash32 getWeakHash32() const override;
@@ -156,7 +159,7 @@ public:
     ColumnPtr permute(const Permutation & perm, size_t limit) const override;
     ColumnPtr index(const IColumn & indexes, size_t limit) const override;
     ColumnPtr replicate(const Offsets & replicate_offsets) const override;
-    MutableColumns scatter(ColumnIndex num_columns, const Selector & selector) const override;
+    MutableColumns scatter(size_t num_columns, const Selector & selector) const override;
 
     void getPermutation(PermutationSortDirection direction, PermutationSortStability stability,
                         size_t limit, int nan_direction_hint, Permutation & res) const override;
@@ -201,6 +204,7 @@ public:
     bool hasDynamicStructure() const override { return true; }
     bool dynamicStructureEquals(const IColumn & rhs) const override;
     void takeDynamicStructureFromSourceColumns(const Columns & source_columns) override;
+    void takeDynamicStructureFromColumn(const ColumnPtr & source_column) override;
 
     const PathToColumnMap & getTypedPaths() const { return typed_paths; }
     PathToColumnMap & getTypedPaths() { return typed_paths; }
@@ -278,11 +282,16 @@ public:
     /// Insert all the data from shared data with specified path to dynamic column.
     static void fillPathColumnFromSharedData(IColumn & path_column, StringRef path, const ColumnPtr & shared_data_column, size_t start, size_t end);
 
+    /// Validate that all dynamic paths have correct sizes.
+    void validateDynamicPathsSizes() const;
+
 private:
     class SortedPathsIterator;
 
     void insertFromSharedDataAndFillRemainingDynamicPaths(const ColumnObject & src_object_column, std::vector<std::string_view> && src_dynamic_paths_for_shared_data, size_t start, size_t length);
     void serializePathAndValueIntoArena(Arena & arena, const char *& begin, StringRef path, StringRef value, StringRef & res) const;
+    void serializeDynamicPathsAndSharedDataIntoArena(size_t n, Arena & arena, const char *& begin, StringRef & res) const;
+    const char * deserializeDynamicPathsAndSharedDataFromArena(const char * pos);
 
     /// Map path -> column for paths with explicitly specified types.
     /// This set of paths is constant and cannot be changed.
