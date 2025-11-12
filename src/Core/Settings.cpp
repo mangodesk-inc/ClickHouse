@@ -3128,6 +3128,17 @@ Possible values:
  Same as `direct,hash`, i.e. try to use direct join and hash join join (in this order).
 
 )", 0) \
+    DECLARE(Bool, enable_direct_join_with_merge_tree, false, R"(
+Enable direct join with MergeTree tables. When enabled, MergeTree tables can be used with the direct join algorithm,
+which performs key lookups directly on the table using filters instead of loading the entire table into memory.
+This is beneficial for large dimension tables when joining on the primary key.
+
+Requires join_algorithm to include 'direct'.
+
+Possible values:
+- 0 — Disabled (default). MergeTree tables use hash join.
+- 1 — Enabled. MergeTree tables can use direct join when joining on primary key columns.
+)", 0) \
     DECLARE(UInt64, cross_join_min_rows_to_compress, 10000000, R"(
 Minimal count of rows to compress block in CROSS JOIN. Zero value means - disable this threshold. This block is compressed when any of the two thresholds (by rows or by bytes) are reached.
 )", 0) \

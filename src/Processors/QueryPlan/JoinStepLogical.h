@@ -20,6 +20,7 @@ namespace DB
 class StorageJoin;
 class IKeyValueEntity;
 struct JoinAlgorithmParams;
+struct StorageID;
 
 struct PreparedJoinStorage
 {
@@ -28,8 +29,10 @@ struct PreparedJoinStorage
     /// At most one of these fields is set
     std::shared_ptr<StorageJoin> storage_join;
     std::shared_ptr<const IKeyValueEntity> storage_key_value;
+    /// Table name should be later converted to KeyValueEntity
+    std::shared_ptr<StorageID> table_name;
 
-    operator bool() const { return storage_join || storage_key_value; } /// NOLINT
+    operator bool() const { return storage_join || storage_key_value || table_name; } /// NOLINT
 
     template <typename Visitor>
     void visit(Visitor && visitor)

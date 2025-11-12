@@ -22,6 +22,7 @@
 
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/DirectJoinMergeTreeEntity.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Interpreters/FullSortingMergeJoin.h>
 #include <Interpreters/HashJoin/HashJoin.h>
@@ -44,12 +45,14 @@
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/QueryPlanSerializationSettings.h>
 #include <Processors/QueryPlan/QueryPlanStepRegistry.h>
+#include <Processors/QueryPlan/ReadFromMergeTree.h>
 #include <Processors/QueryPlan/Serialization.h>
 #include <Processors/Transforms/JoiningTransform.h>
 #include <Processors/QueryPlan/Optimizations/Optimizations.h>
 
 #include <QueryPipeline/QueryPipelineBuilder.h>
 
+#include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/StorageJoin.h>
 
 #include <Processors/QueryPlan/Optimizations/joinOrder.h>
@@ -777,6 +780,36 @@ static void constructPhysicalStep(
         nodes, makeDescription("Post Join Actions"));
 }
 
+// static void tryDirectJoinWithMergeTree(
+//     std::vector<QueryPlanNode *> children,
+//     QueryPlan::Nodes & nodes)
+// {
+//     auto * right_child = children.back();
+//     auto * expression_step = typeid_cast<ExpressionStep *>(right_child->step.get());
+//     if (!expression_step || right_child->children.size() != 1)
+//         return;
+
+//     ReadFromMergeTree * reading_step =  typeid_cast<ReadFromMergeTree *>(right_child->children.front()->step.get());
+//     if (!reading_step)
+//         return;
+
+//     String table_name = reading_step->getStorageID().getTableName();
+//     LOG_DEBUG(&Poco::Logger::get("XXXX"), "{}:{}: '{}'", __FILE__, __LINE__, table_name);
+
+//     QueryPlan right_plan = QueryPlan::extractSubplan(right_child, nodes);
+
+
+//     QueryPlan lookup_plan;
+//     auto reading_from_table = std::make_unique<ReadFromTableStep>(reading_step->getOutputHeader(), table_name, TableExpressionModifiers{});
+//     lookup_plan.addStep(std::move(reading_from_table));
+
+//     PreparedJoinStorage prepared_storage;
+//     prepared_storage.storage_key_value = std::make_unique<DirectJoinMergeTreeEntity>(std::move(lookup_plan), "EventId", context);
+
+//     auto join_lookup = std::make_unique<JoinStepLogicalLookup>(std::move(right_plan), prepared_storage, false);
+//     children.back()->step = std::move(join_lookup);
+// }
+
 static QueryPlanNode buildPhysicalJoinImpl(
     std::vector<QueryPlanNode *> children,
     JoinOperator join_operator,
@@ -788,7 +821,13 @@ static QueryPlanNode buildPhysicalJoinImpl(
     const QueryPlanOptimizationSettings & optimization_settings,
     QueryPlan::Nodes & nodes)
 {
+
     auto * logical_lookup = typeid_cast<JoinStepLogicalLookup *>(children.back()->step.get());
+
+    // if (!logical_lookup)
+    // {
+    //     tryDirectJoinWithMergeTree();
+    // }
 
     auto table_join = std::make_shared<TableJoin>(join_settings, logical_lookup && logical_lookup->useNulls(),
         Context::getGlobalContextInstance()->getGlobalTemporaryVolume(),

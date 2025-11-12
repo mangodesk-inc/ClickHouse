@@ -300,6 +300,7 @@ void SortingStep::finishSorting(
         {
             if (stream_type != QueryPipelineBuilder::StreamType::Main)
                 return nullptr;
+            LOG_DEBUG(&Poco::Logger::get("XXXX"), "{}:{}: limit_ {}", __FILE__, __LINE__, limit_);
 
             return std::make_shared<PartialSortingTransform>(header, result_sort_desc, limit_);
         });
@@ -317,7 +318,7 @@ void SortingStep::finishSorting(
 
             if (increase_sort_description_compile_attempts)
                 increase_sort_description_compile_attempts = false;
-
+            LOG_DEBUG(&Poco::Logger::get("XXXX"), "{}:{}: limit_ {}", __FILE__, __LINE__, limit_);
             return std::make_shared<FinishSortingTransform>(
                 header, input_sort_desc, result_sort_desc, sort_settings.max_block_size, limit_, increase_sort_description_compile_attempts_current);
         });

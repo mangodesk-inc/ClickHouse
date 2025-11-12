@@ -1608,7 +1608,7 @@ std::tuple<QueryPlan, JoinPtr> buildJoinQueryPlan(
             set_used_column_with_duplicates(columns_from_right_table, JoinTableSide::Right);
     }
 
-    trySetStorageInTableJoin(right_table_expression, table_join);
+    trySetStorageInTableJoin(right_table_expression, table_join, planner_context->getQueryContext());
     auto prepared_join_storage = tryGetStorageInTableJoin(right_table_expression, planner_context);
     auto hash_table_stat_cache_key = preCalculateCacheKey(right_table_expression, select_query_info);
     JoinAlgorithmParams params(*planner_context->getQueryContext());

@@ -53,6 +53,9 @@
 #include <Interpreters/JoinOperator.h>
 #include <DataTypes/DataTypeNothing.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <Interpreters/DirectJoinMergeTreeEntity.h>
+#include <Processors/QueryPlan/ReadFromTableStep.h>
+
 
 #include <memory>
 #include <stack>
@@ -605,7 +608,18 @@ PreparedJoinStorage tryGetStorageInTableJoin(const QueryTreeNodePtr & table_expr
     if (result.storage_key_value)
         return result;
 
-    return {};
+    QueryPlan lookup_plan;
+    const auto & table_name = storage->getStorageID().getFullTableName();
+
+    auto table_header = std::make_shared<Block>();
+    for (const auto & column : table_expression_data.getColumns())
+        table_header->insert(ColumnWithTypeAndName(column.type, column.name));
+    auto reading_from_table = std::make_unique<ReadFromTableStep>(table_header, table_name, TableExpressionModifiers{});
+    lookup_plan.addStep(std::move(reading_from_table));
+
+    result.storage_key_value = std::make_unique<DirectJoinMergeTreeEntity>(std::move(lookup_plan), "EventId", planner_context->getQueryContext());
+
+    return result;
 }
 
 }

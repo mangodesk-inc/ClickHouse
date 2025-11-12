@@ -977,6 +977,8 @@ InputOrderInfoPtr buildInputOrderInfo(SortingStep & sorting, bool & apply_virtua
             fixed_columns,
             dag, description,
             limit);
+        LOG_DEBUG(&Poco::Logger::get("XXXX"), "{}:{}: {}\n{}", __FILE__, __LINE__, limit, dag->dumpDAG());
+        LOG_DEBUG(&Poco::Logger::get("XXXX"), "{}:{}: '{}' {}", __FILE__, __LINE__, bool(order_info.input_order), reading->getStorageID().getNameForLogs());
 
         if (order_info.input_order)
         {
@@ -1317,6 +1319,7 @@ void optimizeReadInOrder(QueryPlan::Node & node, QueryPlan::Nodes & nodes)
     else if (auto order_info = buildInputOrderInfo(*sorting, apply_virtual_row, *node.children.front()))
     {
         /// Use buffering only if have filter or don't have limit.
+        LOG_DEBUG(&Poco::Logger::get("XXXX"), "{}:{}: {} apply_virtual_row = {}", __FILE__, __LINE__, __PRETTY_FUNCTION__, apply_virtual_row);
         bool use_buffering = order_info->limit == 0;
         sorting->convertToFinishSorting(order_info->sort_description_for_merging, use_buffering, apply_virtual_row);
     }
