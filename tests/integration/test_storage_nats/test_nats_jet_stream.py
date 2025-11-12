@@ -824,6 +824,12 @@ def test_nats_overloaded_insert(nats_cluster):
     for thread in threads:
         thread.join()
 
+    if int(result) == messages_num * threads_num:
+        repeated_msgs = TSV(instance.query(
+            "SELECT key, count() AS count FROM test.view_overload GROUP BY key HAVING count > 1 ORDER BY count DESC"
+        ))
+        logging.debug(f"Repeated messages:\n{repeated_msgs}")
+
     assert (
         int(result) == messages_num * threads_num
     ), "ClickHouse lost some messages or got duplicated ones. Total count: {}".format(
